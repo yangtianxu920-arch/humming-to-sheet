@@ -1,0 +1,2428 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>哼唱转乐谱</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.10.0/tf.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@300;400;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1a1208;
+    --paper: #f5f0e8;
+    --paper2: #ede7d6;
+    --accent: #c0392b;
+    --accent2: #8b6914;
+    --line: #c8bfa8;
+    --staff: #6b5a3e;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Noto Serif SC', serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Paper texture overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: 
+      repeating-linear-gradient(0deg, transparent, transparent 31px, var(--line) 31px, var(--line) 32px);
+    opacity: 0.15;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 48px 24px;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Header */
+  header {
+    text-align: center;
+    margin-bottom: 52px;
+  }
+
+  .title-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--accent2);
+    margin-bottom: 12px;
+  }
+
+  h1 {
+    font-size: clamp(2rem, 6vw, 3.2rem);
+    font-weight: 300;
+    letter-spacing: -0.5px;
+    line-height: 1.15;
+    color: var(--ink);
+  }
+
+  h1 span {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .subtitle {
+    margin-top: 14px;
+    font-size: 14px;
+    color: var(--staff);
+    letter-spacing: 0.3px;
+  }
+
+  /* Divider */
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 32px 0;
+    color: var(--line);
+  }
+  .divider::before, .divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--line);
+  }
+  .divider-icon { font-size: 16px; }
+
+  /* Upload zone */
+  .upload-zone {
+    border: 2px dashed var(--line);
+    border-radius: 4px;
+    padding: 48px 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    background: rgba(255,255,255,0.35);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .upload-zone::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(192,57,43,0.04) 0%, transparent 60%);
+    pointer-events: none;
+  }
+
+  .upload-zone:hover, .upload-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(192,57,43,0.04);
+    transform: translateY(-1px);
+  }
+
+  .upload-icon {
+    font-size: 40px;
+    margin-bottom: 16px;
+    display: block;
+    opacity: 0.6;
+  }
+
+  .upload-zone h2 {
+    font-size: 18px;
+    font-weight: 400;
+    margin-bottom: 8px;
+  }
+
+  .upload-zone p {
+    font-size: 13px;
+    color: var(--staff);
+    font-family: 'Space Mono', monospace;
+  }
+
+  #fileInput { display: none; }
+
+  /* Settings panel */
+  .settings {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 24px;
+  }
+
+  .setting-item {
+    background: rgba(255,255,255,0.5);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 16px;
+  }
+
+  .setting-item label {
+    display: block;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent2);
+    margin-bottom: 10px;
+  }
+
+  .setting-item select,
+  .setting-item input[type="range"] {
+    width: 100%;
+    appearance: none;
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 6px 10px;
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    color: var(--ink);
+    cursor: pointer;
+  }
+
+  .setting-item select:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  input[type="range"] {
+    border: none !important;
+    padding: 0 !important;
+    height: 4px;
+    background: var(--line) !important;
+    cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  .range-display {
+    text-align: right;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+    margin-top: 6px;
+  }
+
+  /* Record button */
+  .record-section {
+    text-align: center;
+    margin: 24px 0;
+  }
+
+  .btn-record {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    padding: 14px 32px;
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border-radius: 3px;
+  }
+
+  .btn-record:hover { background: var(--accent); }
+  .btn-record.recording { background: var(--accent); animation: pulse-btn 1.5s infinite; }
+
+  @keyframes pulse-btn {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(192,57,43,0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(192,57,43,0); }
+  }
+
+  .rec-dot {
+    width: 8px; height: 8px;
+    background: currentColor;
+    border-radius: 50%;
+  }
+  .btn-record.recording .rec-dot { animation: blink 1s infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+  /* Convert button */
+  .btn-convert {
+    width: 100%;
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 18px;
+    font-family: 'Space Mono', monospace;
+    font-size: 14px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 4px;
+    margin-top: 8px;
+    transition: all 0.2s;
+    display: none;
+  }
+
+  .btn-convert:hover { background: #a93226; }
+  .btn-convert:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Audio player */
+  .audio-preview {
+    display: none;
+    background: rgba(255,255,255,0.5);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 16px 20px;
+    margin-top: 16px;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .audio-preview.visible { display: flex; }
+
+  .audio-filename {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--staff);
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  audio { width: 100%; margin-top: 8px; }
+
+  /* Progress */
+  .progress-area {
+    display: none;
+    margin-top: 24px;
+    text-align: center;
+  }
+
+  .progress-area.visible { display: block; }
+
+  .progress-steps {
+    display: flex;
+    justify-content: center;
+    gap: 0;
+    margin-bottom: 20px;
+  }
+
+  .step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    max-width: 120px;
+    position: relative;
+  }
+
+  .step::after {
+    content: '';
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    width: 100%;
+    height: 1px;
+    background: var(--line);
+  }
+
+  .step:last-child::after { display: none; }
+
+  .step-dot {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: 2px solid var(--line);
+    background: var(--paper);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px;
+    font-family: 'Space Mono', monospace;
+    position: relative;
+    z-index: 1;
+    transition: all 0.3s;
+  }
+
+  .step.active .step-dot { border-color: var(--accent); color: var(--accent); }
+  .step.done .step-dot { border-color: var(--accent2); background: var(--accent2); color: white; }
+
+  .step-label {
+    font-size: 10px;
+    color: var(--staff);
+    font-family: 'Space Mono', monospace;
+    text-align: center;
+  }
+
+  .progress-bar-wrap {
+    background: var(--paper2);
+    border-radius: 2px;
+    height: 3px;
+    overflow: hidden;
+    margin: 12px 0;
+  }
+
+  .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent2), var(--accent));
+    width: 0%;
+    transition: width 0.4s ease;
+  }
+
+  .progress-text {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    color: var(--staff);
+  }
+
+  /* Result: Sheet Music */
+  .result-area {
+    display: none;
+    margin-top: 32px;
+  }
+
+  .result-area.visible { display: block; }
+
+  .result-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+
+  .result-title {
+    font-size: 16px;
+    font-weight: 400;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .result-badge {
+    background: var(--accent2);
+    color: white;
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 1px;
+    padding: 3px 8px;
+    border-radius: 2px;
+  }
+
+  .btn-download {
+    background: transparent;
+    border: 1px solid var(--ink);
+    color: var(--ink);
+    padding: 8px 16px;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.2s;
+    text-decoration: none;
+    display: inline-block;
+  }
+  .btn-download:hover { background: var(--ink); color: var(--paper); }
+
+  /* Playback controls */
+  .playback-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 16px;
+    background: rgba(255,255,255,0.5);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 12px 16px;
+    flex-wrap: wrap;
+  }
+
+  .btn-play {
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    padding: 10px 20px;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .btn-play:hover { background: var(--accent); }
+  .btn-play.playing { background: var(--accent); }
+
+  /* Tap tempo */
+  .tap-bar {
+    background: rgba(255,255,255,0.5);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 12px 16px;
+    margin-top: 10px;
+  }
+  .tap-title {
+    font-size: 13px;
+    color: var(--ink);
+  }
+  .btn-tap {
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    padding: 10px 18px;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.1s;
+    white-space: nowrap;
+  }
+  .btn-tap:active { transform: scale(0.95); background: var(--accent); }
+  .tap-result {
+    font-family: 'Space Mono', monospace;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent);
+    min-width: 80px;
+  }
+
+  .tempo-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--staff);
+  }
+
+  .tempo-control input {
+    width: 80px;
+  }
+
+  .playback-note {
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 700;
+    min-width: 40px;
+  }
+
+  /* Staff notation display */
+  .sheet-display {
+    background: white;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 16px 8px;
+    overflow-x: auto;
+  }
+
+  canvas#sheetCanvas {
+    display: block;
+    max-width: 100%;
+  }
+
+  /* Note list */
+  .note-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 20px;
+  }
+
+  .note-chip {
+    background: var(--paper2);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 4px 10px;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--ink);
+    transition: all 0.15s;
+    cursor: default;
+    animation: fadeIn 0.3s ease both;
+  }
+
+  .note-chip.rest { color: var(--line); font-style: italic; }
+  .note-chip:hover { background: var(--accent); color: white; border-color: var(--accent); }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Stats */
+  .stats-row {
+    display: flex;
+    gap: 16px;
+    margin-top: 20px;
+  }
+
+  .stat-box {
+    flex: 1;
+    background: rgba(255,255,255,0.5);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 14px;
+    text-align: center;
+  }
+
+  .stat-num {
+    font-family: 'Space Mono', monospace;
+    font-size: 24px;
+    color: var(--accent);
+    display: block;
+  }
+
+  .stat-label {
+    font-size: 11px;
+    color: var(--staff);
+    margin-top: 4px;
+  }
+
+  /* Error */
+  .error-msg {
+    background: rgba(192,57,43,0.08);
+    border-left: 3px solid var(--accent);
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--accent);
+    border-radius: 0 4px 4px 0;
+    margin-top: 16px;
+    display: none;
+    font-family: 'Space Mono', monospace;
+  }
+
+  .error-msg.visible { display: block; }
+
+  /* Tip */
+  .tip {
+    background: rgba(139,105,20,0.08);
+    border: 1px solid rgba(139,105,20,0.25);
+    border-radius: 4px;
+    padding: 14px 16px;
+    margin-top: 20px;
+    font-size: 12px;
+    color: var(--accent2);
+    line-height: 1.6;
+  }
+
+  .tip strong { font-weight: 600; }
+
+  /* Metronome */
+  .metronome-section {
+    background: rgba(255,255,255,0.5);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+  .metronome-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .metronome-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .metronome-hint {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--staff);
+  }
+  .metronome-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .btn-metro {
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    padding: 10px 16px;
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .btn-metro:hover { background: var(--accent); }
+  .btn-metro.active { background: var(--accent); }
+
+  .metro-beat-display {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .beat-dot {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--line);
+    transition: all 0.05s;
+    display: block;
+  }
+  .beat-dot.on { background: var(--accent); transform: scale(1.3); }
+  .beat-dot.strong { background: var(--accent2); transform: scale(1.5); }
+
+  .metro-bpm-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Space Mono', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .metro-bpm-control input { width: 80px; }
+  .metro-sig-control {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  footer {
+    text-align: center;
+    margin-top: 56px;
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--line);
+    letter-spacing: 2px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="title-label">音乐转录工具</div>
+    <h1>哼唱<span>转乐谱</span></h1>
+    <p class="subtitle">上传人声录音 · 自动识别音高 · 生成五线谱</p>
+  </header>
+
+  <div class="divider"><span class="divider-icon">♩</span></div>
+
+  <!-- Upload -->
+  <div class="upload-zone" id="uploadZone">
+    <span class="upload-icon">🎵</span>
+    <h2>拖拽音频文件到这里</h2>
+    <p>支持 M4A · WAV · MP3 · AAC · FLAC · OGG &nbsp;|&nbsp; 点击选择文件</p>
+    <input type="file" id="fileInput" accept="*/*">
+  </div>
+
+  <!-- Metronome -->
+  <div class="metronome-section" id="metronomeSection">
+    <div class="metronome-header">
+      <span class="metronome-title">内置节拍器</span>
+      <span class="metronome-hint">先开节拍器，跟着哼唱再录音</span>
+    </div>
+    <div class="metronome-controls">
+      <button class="btn-metro" id="btnMetro">▶ 开始节拍</button>
+      <div class="metro-beat-display" id="metroBeat">
+        <span class="beat-dot" id="beat0"></span>
+        <span class="beat-dot" id="beat1"></span>
+        <span class="beat-dot" id="beat2"></span>
+        <span class="beat-dot" id="beat3"></span>
+      </div>
+      <div class="metro-bpm-control">
+        <input type="range" id="metroBpm" min="40" max="200" value="80">
+        <span id="metroBpmVal">80</span> <span style="font-size:10px;color:var(--staff)">BPM</span>
+      </div>
+      <div class="metro-sig-control">
+        <label style="font-size:10px;color:var(--staff);font-family:'Space Mono',monospace">拍号</label>
+        <select id="metroSig" style="font-family:'Space Mono',monospace;font-size:12px;border:1px solid var(--line);border-radius:3px;padding:4px 8px;background:transparent">
+          <option value="4">4/4</option>
+          <option value="3">3/4</option>
+          <option value="2">2/4</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Record -->
+  <div class="record-section">
+    <button class="btn-record" id="btnRecord">
+      <span class="rec-dot"></span>
+      <span id="recLabel">直接录音</span>
+    </button>
+    <div id="recTimer" style="font-family:'Space Mono',monospace;font-size:12px;color:var(--staff);margin-top:8px;display:none;"></div>
+  </div>
+
+  <!-- Audio Preview -->
+  <div class="audio-preview" id="audioPreview">
+    <div style="flex:1">
+      <div class="audio-filename" id="audioFilename">—</div>
+      <audio id="audioPlayer" controls></audio>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div class="settings">
+    <div class="setting-item" style="grid-column:1/-1">
+      <label>速度 & 拍号 <span style="color:var(--accent);font-size:9px;letter-spacing:1px">自动检测</span></label>
+      <div id="autoDetectResult" style="font-family:'Space Mono',monospace;font-size:13px;color:var(--accent);padding:6px 0;">上传音频后自动分析</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+        <span style="font-size:11px;color:var(--staff)">手动微调 BPM</span>
+        <input type="range" id="bpmRange" min="40" max="200" value="80" style="flex:1">
+        <span id="bpmDisplay" style="font-family:'Space Mono',monospace;font-size:12px;color:var(--accent);min-width:30px">80</span>
+      </div>
+    </div>
+    <div class="setting-item">
+      <label>音域</label>
+      <select id="rangeSelect">
+        <option value="vocal">人声 (C3–C6)</option>
+        <option value="high">高音 (C4–C7)</option>
+        <option value="low">低音 (C2–C4)</option>
+      </select>
+    </div>
+    <div class="setting-item">
+      <label>调号</label>
+      <select id="keySelect">
+        <option value="C">C 大调</option>
+        <option value="G">G 大调</option>
+        <option value="F">F 大调</option>
+        <option value="D">D 大调</option>
+        <option value="Am">A 小调</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="error-msg" id="errorMsg"></div>
+
+  <button class="btn-convert" id="btnConvert">✦ 开始转谱</button>
+
+  <!-- Progress -->
+  <div class="progress-area" id="progressArea">
+    <div class="progress-steps">
+      <div class="step" id="step1">
+        <div class="step-dot">1</div>
+        <div class="step-label">加载音频</div>
+      </div>
+      <div class="step" id="step2">
+        <div class="step-dot">2</div>
+        <div class="step-label">AI识别</div>
+      </div>
+      <div class="step" id="step3">
+        <div class="step-dot">3</div>
+        <div class="step-label">量化节奏</div>
+      </div>
+      <div class="step" id="step4">
+        <div class="step-dot">4</div>
+        <div class="step-label">生成乐谱</div>
+      </div>
+    </div>
+    <div class="progress-bar-wrap">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    <div class="progress-text" id="progressText">准备中...</div>
+  </div>
+
+  <!-- Result -->
+  <div class="result-area" id="resultArea">
+    <div class="result-header">
+      <div class="result-title">
+        识别结果
+        <span class="result-badge">TRANSCRIBED</span>
+      </div>
+      <a class="btn-download" id="btnDownload" href="#" download="sheet.txt">↓ 导出</a>
+    </div>
+
+    <div class="sheet-display">
+      <canvas id="sheetCanvas"></canvas>
+    </div>
+
+    <!-- Playback -->
+    <div class="playback-bar">
+      <button class="btn-play" id="btnPlay">▶ 播放</button>
+      <button class="btn-play" id="btnStop" style="background:transparent;color:var(--ink);border:1px solid var(--line);">■ 停止</button>
+      <div class="tempo-control">
+        <span>速度</span>
+        <input type="range" id="playbackBpm" min="40" max="200" value="80" style="width:70px">
+        <span id="playbackBpmVal">80</span>
+      </div>
+      <div class="playback-note" id="playbackNote">—</div>
+    </div>
+
+    <!-- Tap Tempo -->
+    <div class="tap-bar" id="tapBar">
+      <div class="tap-title">节奏校准 <span style="font-size:10px;color:var(--staff);font-family:'Space Mono',monospace">跟着录音打拍子 → 重新生成乐谱</span></div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn-tap" id="btnTap">♩ 点击打拍</button>
+        <div class="tap-result" id="tapResult">—</div>
+        <button class="btn-tap" id="btnTapApply" style="background:var(--accent2);display:none">✓ 用此BPM重新转谱</button>
+        <button class="btn-tap" id="btnTapReset" style="background:transparent;color:var(--staff);border:1px solid var(--line);display:none">重置</button>
+      </div>
+    </div>
+
+    <div class="note-list" id="noteList"></div>
+
+    <div class="stats-row">
+      <div class="stat-box">
+        <span class="stat-num" id="statNotes">—</span>
+        <div class="stat-label">音符数量</div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-num" id="statDuration">—</span>
+        <div class="stat-label">时长（拍）</div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-num" id="statRange">—</span>
+        <div class="stat-label">音域跨度</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tip">
+    <strong>录音小贴士：</strong>环境安静时效果最好。哼唱时尽量保持稳定音高，每个音符之间稍作停顿。建议跟着节拍器录制，识别效果更准确。
+  </div>
+
+  <footer>HUMMING TO SHEET · POWERED BY WEB AUDIO API + AI TRANSCRIPTION</footer>
+
+</div>
+
+<script>
+// ─── State ────────────────────────────────────────────────
+let audioBuffer = null;
+let audioCtx = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+let isRecording = false;
+let recInterval = null;
+let recSeconds = 0;
+let currentAudioBlob = null;
+
+// ─── BPM slider ───────────────────────────────────────────
+const bpmRange = document.getElementById('bpmRange');
+const bpmDisplay = document.getElementById('bpmDisplay');
+bpmRange.addEventListener('input', () => bpmDisplay.textContent = bpmRange.value);
+
+// ─── Metronome ────────────────────────────────────────────
+let metroCtx = null;
+let metroRunning = false;
+let metroNextTime = 0;
+let metroBeatCount = 0;
+let metroScheduler = null;
+
+const metroBpmSlider = document.getElementById('metroBpm');
+const metroBpmVal = document.getElementById('metroBpmVal');
+metroBpmSlider.addEventListener('input', () => {
+  metroBpmVal.textContent = metroBpmSlider.value;
+  // 同步到主BPM滑块
+  bpmRange.value = metroBpmSlider.value;
+  bpmDisplay.textContent = metroBpmSlider.value;
+});
+
+document.getElementById('btnMetro').addEventListener('click', toggleMetronome);
+
+function toggleMetronome() {
+  if (metroRunning) {
+    stopMetronome();
+  } else {
+    startMetronome();
+  }
+}
+
+function startMetronome() {
+  metroCtx = new (window.AudioContext || window.webkitAudioContext)();
+  metroRunning = true;
+  metroBeatCount = 0;
+  metroNextTime = metroCtx.currentTime + 0.1;
+  document.getElementById('btnMetro').textContent = '■ 停止节拍';
+  document.getElementById('btnMetro').classList.add('active');
+  scheduleMetro();
+}
+
+function stopMetronome() {
+  metroRunning = false;
+  clearTimeout(metroScheduler);
+  if (metroCtx) { metroCtx.close(); metroCtx = null; }
+  document.getElementById('btnMetro').textContent = '▶ 开始节拍';
+  document.getElementById('btnMetro').classList.remove('active');
+  // 清除所有节拍点亮
+  document.querySelectorAll('.beat-dot').forEach(d => d.classList.remove('on','strong'));
+}
+
+function scheduleMetro() {
+  if (!metroRunning) return;
+  const bpm = parseInt(metroBpmSlider.value);
+  const beatsPerMeasure = parseInt(document.getElementById('metroSig').value);
+  const beatDur = 60 / bpm;
+  const lookahead = 0.1; // 提前100ms调度
+
+  while (metroNextTime < metroCtx.currentTime + lookahead) {
+    const beat = metroBeatCount % beatsPerMeasure;
+    playClick(metroNextTime, beat === 0); // 第一拍重音
+
+    // 视觉更新
+    const delay = (metroNextTime - metroCtx.currentTime) * 1000;
+    const capturedBeat = beat;
+    setTimeout(() => {
+      document.querySelectorAll('.beat-dot').forEach((d,i) => {
+        d.classList.remove('on','strong');
+        if (i === capturedBeat) d.classList.add(capturedBeat === 0 ? 'strong' : 'on');
+      });
+      // 显示/隐藏点（根据拍号）
+      document.querySelectorAll('.beat-dot').forEach((d,i) => {
+        d.style.display = i < beatsPerMeasure ? 'block' : 'none';
+      });
+    }, Math.max(0, delay));
+
+    metroNextTime += beatDur;
+    metroBeatCount++;
+  }
+
+  metroScheduler = setTimeout(scheduleMetro, 25);
+}
+
+function playClick(time, isStrong) {
+  if (!metroCtx) return;
+  const osc = metroCtx.createOscillator();
+  const gain = metroCtx.createGain();
+  osc.connect(gain);
+  gain.connect(metroCtx.destination);
+  osc.frequency.value = isStrong ? 1000 : 800;
+  gain.gain.setValueAtTime(isStrong ? 0.8 : 0.5, time);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
+  osc.start(time);
+  osc.stop(time + 0.06);
+}
+
+
+
+// ─── Upload ───────────────────────────────────────────────
+const uploadZone = document.getElementById('uploadZone');
+const fileInput = document.getElementById('fileInput');
+
+uploadZone.addEventListener('click', () => fileInput.click());
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+async function handleFile(file) {
+  currentAudioBlob = file;
+  showAudioPreview(file.name, URL.createObjectURL(file));
+  document.getElementById('btnConvert').style.display = 'block';
+  hideError();
+}
+
+function showAudioPreview(name, url) {
+  document.getElementById('audioFilename').textContent = name;
+  document.getElementById('audioPlayer').src = url;
+  document.getElementById('audioPreview').classList.add('visible');
+}
+
+// ─── Record ───────────────────────────────────────────────
+document.getElementById('btnRecord').addEventListener('click', toggleRecord);
+
+async function toggleRecord() {
+  if (!isRecording) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream);
+      recordedChunks = [];
+      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(recordedChunks, { type: 'audio/webm' });
+        currentAudioBlob = blob;
+        showAudioPreview('录音.webm', URL.createObjectURL(blob));
+        document.getElementById('btnConvert').style.display = 'block';
+        stream.getTracks().forEach(t => t.stop());
+      };
+      mediaRecorder.start();
+      isRecording = true;
+      recSeconds = 0;
+      document.getElementById('btnRecord').classList.add('recording');
+      document.getElementById('recLabel').textContent = '停止录音';
+      document.getElementById('recTimer').style.display = 'block';
+      recInterval = setInterval(() => {
+        recSeconds++;
+        const m = Math.floor(recSeconds/60).toString().padStart(2,'0');
+        const s = (recSeconds%60).toString().padStart(2,'0');
+        document.getElementById('recTimer').textContent = `● REC  ${m}:${s}`;
+      }, 1000);
+    } catch(e) {
+      showError('无法访问麦克风：' + e.message);
+    }
+  } else {
+    mediaRecorder.stop();
+    isRecording = false;
+    clearInterval(recInterval);
+    document.getElementById('btnRecord').classList.remove('recording');
+    document.getElementById('recLabel').textContent = '直接录音';
+    document.getElementById('recTimer').style.display = 'none';
+  }
+}
+
+// ─── Convert ──────────────────────────────────────────────
+document.getElementById('btnConvert').addEventListener('click', startConvert);
+
+async function startConvert() {
+  if (!currentAudioBlob) return;
+  hideError();
+  document.getElementById('resultArea').classList.remove('visible');
+  document.getElementById('progressArea').classList.add('visible');
+  document.getElementById('btnConvert').disabled = true;
+
+  try {
+    // Step 1: Load audio
+    setStep(1);
+    setProgress(10, '加载音频文件...');
+    await sleep(200);
+    const arrayBuf = await currentAudioBlob.arrayBuffer();
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    audioBuffer = await audioCtx.decodeAudioData(arrayBuf).catch(() => {
+      throw new Error('音频解码失败，请尝试用「语音备忘录」导出为 M4A，或转换为 WAV 格式');
+    });
+    setStepDone(1);
+
+    // 自动检测 BPM 和拍号
+    setProgress(20, '自动检测速度和拍号...');
+    const { bpm: detectedBpm, timeSig } = detectBpmAndTimeSig(audioBuffer);
+    document.getElementById('bpmRange').value = detectedBpm;
+    document.getElementById('bpmDisplay').textContent = detectedBpm;
+    document.getElementById('autoDetectResult').textContent =
+      `检测结果：${detectedBpm} BPM · ${timeSig} 拍`;
+    await sleep(100);
+    // 存拍号供后续使用
+    window._timeSig = timeSig;
+
+    // Step 2: AI音高识别
+    setStep(2);
+    setProgress(30, 'AI 识别音高中...');
+    const rawNotes = await detectPitches(audioBuffer);
+    setStepDone(2);
+
+    // 自动检测调号（用音符 midi 值）
+    const detectedKey = detectKeyFromNotes(rawNotes);
+    window._detectedKey = detectedKey;
+    document.getElementById('autoDetectResult').textContent =
+      `检测结果：${detectedBpm} BPM · ${timeSig} 拍 · ${detectedKey}`;
+
+    // Step 3: 量化节奏
+    setStep(3);
+    setProgress(60, '量化节奏时值...');
+    await sleep(200);
+    const bpm = parseInt(bpmRange.value);
+    const minNote = 0.25;
+    const notes = quantizeFromBasicPitch(rawNotes, bpm, minNote);
+    setStepDone(3);
+
+    // Step 4: Render
+    setStep(4);
+    setProgress(85, '绘制乐谱...');
+    await sleep(200);
+    renderSheet(notes, bpm);
+    renderNoteChips(notes);
+    updateStats(notes);
+    globalNotes = notes;
+    document.getElementById('playbackBpm').value = bpm;
+    document.getElementById('playbackBpmVal').textContent = bpm;
+    setStepDone(4);
+    setProgress(100, '完成！');
+    await sleep(300);
+
+    document.getElementById('resultArea').classList.add('visible');
+    document.getElementById('resultArea').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setupDownload(notes, bpm);
+
+  } catch(e) {
+    showError('转换失败：' + e.message + ' | ' + e.stack?.split('\n')[1]);
+    console.error(e);
+  }
+
+  document.getElementById('btnConvert').disabled = false;
+}
+
+// ─── Key Detection (Krumhansl-Schmuckler profiles) ────────
+function detectKey(pitches) {
+  // 大调和小调音高轮廓
+  const majorProfile = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
+  const minorProfile = [6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17];
+
+  // 统计每个音高类别出现次数
+  const counts = new Array(12).fill(0);
+  for (const p of pitches) {
+    if (p.voiced && p.freq) {
+      const midi = Math.round(69 + 12 * Math.log2(p.freq / 440));
+      counts[((midi % 12) + 12) % 12]++;
+    }
+  }
+
+  const total = counts.reduce((a,b) => a+b, 0) || 1;
+  const norm = counts.map(c => c / total);
+
+  // 和每个调的轮廓做相关系数
+  const noteNames = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  let bestKey = 'C 大调', bestScore = -Infinity;
+
+  for (let root = 0; root < 12; root++) {
+    // 大调
+    const majorScore = pearson(norm, rotate(majorProfile, root));
+    if (majorScore > bestScore) {
+      bestScore = majorScore;
+      bestKey = noteNames[root] + ' 大调';
+    }
+    // 小调
+    const minorScore = pearson(norm, rotate(minorProfile, root));
+    if (minorScore > bestScore) {
+      bestScore = minorScore;
+      bestKey = noteNames[root] + ' 小调';
+    }
+  }
+
+  return bestKey;
+}
+
+function rotate(arr, n) {
+  return [...arr.slice(n), ...arr.slice(0, n)];
+}
+
+function pearson(a, b) {
+  const n = a.length;
+  const meanA = a.reduce((s,x)=>s+x,0)/n;
+  const meanB = b.reduce((s,x)=>s+x,0)/n;
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < n; i++) {
+    const xa = a[i]-meanA, xb = b[i]-meanB;
+    num += xa*xb; da += xa*xa; db += xb*xb;
+  }
+  return da && db ? num / Math.sqrt(da*db) : 0;
+}
+
+
+function detectBpmAndTimeSig(buffer) {
+  const data = buffer.getChannelData(0);
+  const sr = buffer.sampleRate;
+  const hopSize = Math.floor(sr * 0.01); // 10ms hops
+
+  // 1. 计算 onset strength（能量变化）
+  const energies = [];
+  for (let i = 0; i + hopSize < data.length; i += hopSize) {
+    let e = 0;
+    for (let j = 0; j < hopSize; j++) e += data[i+j] * data[i+j];
+    energies.push(Math.sqrt(e / hopSize));
+  }
+
+  // 2. 差分（只取上升部分 = onset）
+  const onsets = energies.map((e, i) => i === 0 ? 0 : Math.max(0, e - energies[i-1]));
+
+  // 3. 自相关检测周期
+  const minBpm = 50, maxBpm = 200;
+  const minLag = Math.floor(60 / maxBpm / 0.01);
+  const maxLag = Math.floor(60 / minBpm / 0.01);
+
+  let bestLag = minLag, bestScore = -1;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let score = 0;
+    for (let i = 0; i + lag < onsets.length; i++) score += onsets[i] * onsets[i + lag];
+    if (score > bestScore) { bestScore = score; bestLag = lag; }
+  }
+
+  // 4. 换算 BPM，取整到最近的整数
+  let bpm = Math.round(60 / (bestLag * 0.01));
+
+  // 5. 限制在合理范围，倍速校正
+  while (bpm < 55) bpm *= 2;
+  while (bpm > 180) bpm = Math.round(bpm / 2);
+  bpm = Math.max(50, Math.min(180, bpm));
+
+  // 6. 推断拍号（用音符间隔规律）
+  // 简单启发：收集 onset 间隔，看最常见的比值
+  const peakGaps = [];
+  let lastPeak = -1;
+  const threshold = Math.max(...onsets) * 0.3;
+  for (let i = 1; i < onsets.length - 1; i++) {
+    if (onsets[i] > threshold && onsets[i] > onsets[i-1] && onsets[i] > onsets[i+1]) {
+      if (lastPeak >= 0) peakGaps.push(i - lastPeak);
+      lastPeak = i;
+    }
+  }
+
+  let timeSig = '4/4'; // 默认
+  if (peakGaps.length > 4) {
+    const avg = peakGaps.reduce((a,b) => a+b, 0) / peakGaps.length;
+    const beatFrames = 60 / bpm / 0.01;
+    const ratio = avg / beatFrames;
+    // 如果平均间隔接近 3 拍的倍数 → 3/4
+    if (Math.abs(ratio - 1.5) < 0.3 || Math.abs(ratio - 0.75) < 0.2) timeSig = '3/4';
+    else if (Math.abs(ratio - 1.5) < 0.5) timeSig = '6/8';
+    else timeSig = '4/4';
+  }
+
+  return { bpm, timeSig };
+}
+
+
+// ─── Basic Pitch Integration ─────────────────────────────
+// Replaces autocorrelation with Spotify's neural network model
+
+let _basicPitchModel = null;
+
+async function loadBasicPitchModel() {
+  if (_basicPitchModel) return _basicPitchModel;
+  setProgress(12, '加载 AI 模型...');
+  const bp = new BasicPitch('model/model.json');
+  await bp.model; // wait for model to load
+  _basicPitchModel = bp;
+  return bp;
+}
+
+// Resample audio to 22050 Hz (required by Basic Pitch)
+async function resampleTo22050(audioBuffer) {
+  const targetSR = 22050;
+  if (audioBuffer.sampleRate === targetSR) {
+    return audioBuffer.getChannelData(0);
+  }
+  const ctx = new OfflineAudioContext(1, Math.ceil(audioBuffer.duration * targetSR), targetSR);
+  const src = ctx.createBufferSource();
+  src.buffer = audioBuffer;
+  src.connect(ctx.destination);
+  src.start(0);
+  const resampled = await ctx.startRendering();
+  return resampled.getChannelData(0);
+}
+
+async function detectPitches(buffer) {
+  const bp = await loadBasicPitchModel();
+  const audioData = await resampleTo22050(buffer);
+
+  const allFrames = [];
+  const allOnsets = [];
+  const allContours = [];
+
+  await bp.evaluateModel(
+    audioData,
+    (frames, onsets, contours) => {
+      allFrames.push(...frames);
+      allOnsets.push(...onsets);
+      allContours.push(...contours);
+    },
+    (pct) => setProgress(30 + pct * 25, `AI分析中 ${Math.round(pct*100)}%...`)
+  );
+
+  // Convert frames/onsets to note events
+  const noteEvents = outputToNotesPoly(
+    allFrames, allOnsets,
+    0.5,   // onsetThresh
+    0.3,   // frameThresh
+    5,     // minNoteLen (frames)
+    true,  // inferOnsets
+    null, null,
+    true,  // melodiaTrick
+    11     // energyTolerance
+  );
+
+  const notes = noteFramesToTime(noteEvents);
+
+  // Convert to our pitch format
+  const hopDur = 256 / 22050; // Basic Pitch frame duration
+  const pitches = notes.map(n => ({
+    time: n.startTimeSeconds,
+    duration: n.durationSeconds,
+    freq: 440 * Math.pow(2, (n.pitchMidi - 69) / 12),
+    midi: n.pitchMidi,
+    voiced: true,
+    amplitude: n.amplitude,
+    rms: n.amplitude
+  }));
+
+  // Sort by time
+  pitches.sort((a, b) => a.time - b.time);
+  return pitches;
+}
+
+
+// ─── Hz to MIDI and Note name ─────────────────────────────
+function hzToMidi(hz) {
+  return 69 + 12 * Math.log2(hz / 440);
+}
+
+function midiToNoteName(midi) {
+  const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  const oct = Math.floor(midi / 12) - 1;
+  return names[midi % 12] + oct;
+}
+
+// ─── Quantize ─────────────────────────────────────────────
+function quantizeNotes(pitches, bpm, sr, minNote) {
+  const beatDur = 60 / bpm;
+  const hopDur = 0.02;
+  const noteOptions = [4, 2, 1.5, 1, 0.75, 0.5, 0.25].filter(x => x >= minNote);
+  const timeSig = window._timeSig || '4/4';
+  const beatsPerMeasure = timeSig === '3/4' ? 3 : timeSig === '6/8' ? 6 : 4;
+
+  // ── 用音高跳变分割音符 ────────────────────────────────────
+  const SEMITONE_THRESHOLD = 1.5;
+
+  const segments = [];
+  let cur = null;
+
+  for (const p of pitches) {
+    const rms = p.rms || 0;
+    const midi = p.voiced && p.freq ? hzToMidi(p.freq) : null;
+
+    if (!p.voiced || midi === null) {
+      if (cur && cur.midi !== null) { segments.push(cur); cur = null; }
+      if (cur && cur.midi === null) { cur.duration += hopDur; }
+      else if (!cur) { cur = { midi: null, duration: hopDur, voiced: false }; }
+    } else {
+      if (!cur) {
+        cur = { midi, duration: hopDur, voiced: true, peakRms: rms, minRms: rms };
+      } else if (cur.midi === null) {
+        segments.push(cur);
+        cur = { midi, duration: hopDur, voiced: true, peakRms: rms, minRms: rms };
+      } else if (Math.abs(midi - cur.midi) >= SEMITONE_THRESHOLD) {
+        // 音高跳变 → 新音符
+        segments.push(cur);
+        cur = { midi, duration: hopDur, voiced: true, peakRms: rms, minRms: rms };
+      } else {
+        // 同音：检测能量谷（连续两个相同音符之间的气口）
+        const peak = cur.peakRms || rms;
+        if (cur.duration > 0.08 && rms < peak * 0.65 && cur.minRms < peak * 0.65) {
+          segments.push(cur);
+          cur = { midi, duration: hopDur, voiced: true, peakRms: rms, minRms: rms };
+        } else {
+          cur.midi = cur.midi * 0.85 + midi * 0.15;
+          cur.duration += hopDur;
+          cur.peakRms = Math.max(cur.peakRms || 0, rms);
+          cur.minRms = Math.min(cur.minRms || rms, rms);
+        }
+      }
+    }
+  }
+  if (cur) segments.push(cur);
+
+  // Quantize durations，过滤太短的片段（< 100ms 不算音符）
+  const quantized = segments
+    .filter(s => s.duration > 0.1)
+    .map(s => {
+      const beats = s.duration / beatDur;
+      const q = noteOptions.reduce((a, b) => Math.abs(b - beats) < Math.abs(a - beats) ? b : a);
+      return {
+        name: s.midi !== null ? midiToNoteName(Math.round(s.midi)) : 'R',
+        midi: s.midi !== null ? Math.round(s.midi) : null,
+        beats: Math.max(minNote, q),
+        isRest: !s.voiced || s.midi === null
+      };
+    })
+    .filter(n => n.beats >= minNote);
+
+  // ── 合并：把碎片合并成长音符 ──────────────────────────────
+  // 1. 只吸收极短休止符（< 四分之一拍），更长的断开保留
+  const merged1 = [];
+  for (const n of quantized) {
+    const prev = merged1[merged1.length - 1];
+    if (prev && n.isRest && n.beats <= 0.25 && !prev.isRest) {
+      prev.beats += n.beats;
+    } else {
+      merged1.push({ ...n });
+    }
+  }
+
+  // 2. 合并相邻相同音符（midi 相同且中间没有真正的休止）
+  const merged2 = [];
+  for (const n of merged1) {
+    const prev = merged2[merged2.length - 1];
+    if (prev && !n.isRest && !prev.isRest && prev.midi === n.midi) {
+      prev.beats += n.beats;
+    } else {
+      merged2.push({ ...n });
+    }
+  }
+
+  // 3. 合并连续短休止符
+  const merged3 = [];
+  for (const n of merged2) {
+    const prev = merged3[merged3.length - 1];
+    if (prev && n.isRest && prev.isRest) {
+      prev.beats += n.beats;
+    } else {
+      merged3.push({ ...n });
+    }
+  }
+
+  // 4. 把超长音符量化到合法时值（最长全音符4拍）
+  const maxBeats = beatsPerMeasure || 4;
+  const final = [];
+  for (const n of merged3) {
+    if (n.beats > maxBeats) {
+      // 拆成多个
+      let remaining = n.beats;
+      while (remaining > 0) {
+        const b = Math.min(maxBeats, noteOptions.reduce((a,b) => Math.abs(b-remaining)<Math.abs(a-remaining)?b:a));
+        final.push({ ...n, beats: b });
+        remaining -= b;
+        if (remaining < minNote) break;
+      }
+    } else {
+      final.push(n);
+    }
+  }
+
+  return final;
+}
+
+// ─── Draw Sheet Music on Canvas ───────────────────────────
+function renderSheet(notes, bpm) {
+  const canvas = document.getElementById('sheetCanvas');
+  const dpr = window.devicePixelRatio || 1;
+  const isMobile = window.innerWidth < 500;
+  const timeSig = window._timeSig || '4/4';
+  const beatsPerMeasure = timeSig === '3/4' ? 3 : timeSig === '6/8' ? 6 : 4;
+
+  const lineSpacing = isMobile ? 9 : 12;
+  const clefW = isMobile ? 48 : 58;   // 谱号+拍号占宽
+  const noteStep = isMobile ? 40 : 52;
+  const rowH = isMobile ? 115 : 135;
+  const staffTop = 50;
+  const marginX = 12;
+
+  // ── 先把音符分成小节 ──────────────────────────────────────
+  const measures = [];
+  let curMeasure = [];
+  let curBeats = 0;
+
+  for (const note of notes) {
+    // 如果加入这个音符会超过小节容量，先结束当前小节
+    if (curBeats + note.beats > beatsPerMeasure + 0.01 && curMeasure.length > 0) {
+      measures.push(curMeasure);
+      curMeasure = [];
+      curBeats = 0;
+    }
+    curMeasure.push(note);
+    curBeats += note.beats;
+    // 恰好填满小节
+    if (Math.abs(curBeats - beatsPerMeasure) < 0.01) {
+      measures.push(curMeasure);
+      curMeasure = [];
+      curBeats = 0;
+    }
+  }
+  if (curMeasure.length > 0) measures.push(curMeasure);
+
+  // ── 每行放几个小节 ────────────────────────────────────────
+  const measuresPerRow = isMobile ? 2 : 3;
+  const rowCount = Math.ceil(measures.length / measuresPerRow);
+
+  // 每个小节宽度 = 小节内音符数 * noteStep，但至少留足空间
+  const measureW = Math.floor((window.innerWidth - 80 - clefW - marginX * 2) / measuresPerRow);
+  const W = clefW + measuresPerRow * measureW + marginX * 2;
+  const H = staffTop + rowCount * rowH + 40;
+
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+
+  const staffColor = '#6b5a3e';
+  const noteColor = '#c0392b';
+  const restColor = '#aaa';
+  const inkColor = '#1a1208';
+
+  // 标题
+  ctx.fillStyle = inkColor;
+  ctx.font = `600 ${isMobile ? 12 : 13}px "Noto Serif SC", serif`;
+  ctx.fillText('哼唱转录', marginX, 22);
+  ctx.font = `400 ${isMobile ? 10 : 11}px "Space Mono", monospace`;
+  ctx.fillStyle = '#888';
+  ctx.fillText(`${bpm} BPM  ·  ${timeSig}  ·  ${window._detectedKey || ''}  ·  ${measures.length} 小节`, marginX, 38);
+
+  // ── 逐行绘制 ──────────────────────────────────────────────
+  for (let row = 0; row < rowCount; row++) {
+    const y0 = staffTop + row * rowH;
+    const staffH = lineSpacing * 4;
+
+    // 五条线
+    ctx.strokeStyle = staffColor;
+    ctx.lineWidth = 0.8;
+    for (let l = 0; l < 5; l++) {
+      const ly = y0 + l * lineSpacing;
+      ctx.beginPath();
+      ctx.moveTo(marginX, ly);
+      ctx.lineTo(W - marginX, ly);
+      ctx.stroke();
+    }
+
+    // 左端竖线
+    ctx.beginPath();
+    ctx.moveTo(marginX, y0);
+    ctx.lineTo(marginX, y0 + staffH);
+    ctx.stroke();
+
+    // 谱号
+    ctx.fillStyle = staffColor;
+    ctx.font = `${lineSpacing * 7}px serif`;
+    ctx.fillText('𝄞', marginX + 2, y0 + lineSpacing * 4.8);
+
+    // 拍号数字（第一行才画，省空间）
+    if (row === 0) {
+      const tsTop = timeSig === '3/4' ? 3 : 4;
+      const tsBot = timeSig === '6/8' ? 8 : 4;
+      ctx.fillStyle = staffColor;
+      ctx.font = `bold ${lineSpacing * 1.6}px serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(String(tsTop), marginX + clefW - 10, y0 + lineSpacing * 1.5);
+      ctx.fillText(String(tsBot), marginX + clefW - 10, y0 + lineSpacing * 3.5);
+      ctx.textAlign = 'left';
+    }
+
+    // 本行的小节
+    const rowMeasures = measures.slice(row * measuresPerRow, (row + 1) * measuresPerRow);
+
+    rowMeasures.forEach((measure, mi) => {
+      const measureX = marginX + clefW + mi * measureW;
+      const noteCount = measure.length;
+      const step = noteCount > 0 ? Math.min(noteStep, (measureW - 8) / noteCount) : noteStep;
+
+      // 画每个音符
+      measure.forEach((note, ni) => {
+        const x = measureX + ni * step + step * 0.4;
+
+        if (note.isRest) {
+          ctx.fillStyle = restColor;
+          ctx.font = `${lineSpacing * 2}px serif`;
+          ctx.textAlign = 'center';
+          ctx.fillText('𝄽', x, y0 + lineSpacing * 2.2);
+          ctx.font = `${isMobile ? 7 : 8}px "Space Mono", monospace`;
+          ctx.fillStyle = '#ccc';
+          ctx.fillText('rest', x, y0 + staffH + 13);
+          ctx.textAlign = 'left';
+          return;
+        }
+
+        // 音符纵向位置
+        const midiRef = 71; // B4 = 第一线上方
+        const semitones = midiRef - note.midi;
+        const noteY = y0 + (semitones / 2) * (lineSpacing / 2) + lineSpacing * 0.5;
+
+        // 加线
+        ctx.strokeStyle = staffColor;
+        ctx.lineWidth = 0.9;
+        for (let ly = y0 - lineSpacing; ly >= noteY - 2; ly -= lineSpacing) {
+          ctx.beginPath(); ctx.moveTo(x-8,ly); ctx.lineTo(x+8,ly); ctx.stroke();
+        }
+        for (let ly = y0 + staffH + lineSpacing; ly <= noteY + 2; ly += lineSpacing) {
+          ctx.beginPath(); ctx.moveTo(x-8,ly); ctx.lineTo(x+8,ly); ctx.stroke();
+        }
+
+        // 符头
+        const rx = lineSpacing * 0.52, ry = lineSpacing * 0.36;
+        const filled = note.beats < 2;
+        ctx.beginPath();
+        ctx.ellipse(x, noteY, rx, ry, -0.3, 0, Math.PI * 2);
+        if (filled) { ctx.fillStyle = noteColor; ctx.fill(); }
+        else { ctx.strokeStyle = noteColor; ctx.lineWidth = 1.4; ctx.stroke(); }
+
+        // 符干
+        const stemDir = noteY > y0 + lineSpacing * 2 ? -1 : 1;
+        ctx.beginPath();
+        ctx.strokeStyle = noteColor;
+        ctx.lineWidth = 1.2;
+        ctx.moveTo(x + rx - 1, noteY);
+        ctx.lineTo(x + rx - 1, noteY + stemDir * lineSpacing * 3.2);
+        ctx.stroke();
+
+        // 附点
+        if (note.beats === 1.5 || note.beats === 0.75 || note.beats === 3) {
+          ctx.beginPath();
+          ctx.arc(x + rx + 4, noteY - 2, 1.8, 0, Math.PI * 2);
+          ctx.fillStyle = noteColor; ctx.fill();
+        }
+
+        // 音名
+        ctx.fillStyle = '#999';
+        ctx.font = `${isMobile ? 7 : 8}px "Space Mono", monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillText(note.name, x, y0 + staffH + 13);
+        ctx.textAlign = 'left';
+      });
+
+      // 小节线
+      const barX = measureX + measureW;
+      ctx.strokeStyle = staffColor;
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(barX, y0);
+      ctx.lineTo(barX, y0 + staffH);
+      ctx.stroke();
+    });
+
+    // 最后一行末尾双竖线
+    if (row === rowCount - 1) {
+      const endX = marginX + clefW + rowMeasures.length * measureW;
+      ctx.strokeStyle = staffColor;
+      ctx.lineWidth = 0.9;
+      ctx.beginPath(); ctx.moveTo(endX - 3, y0); ctx.lineTo(endX - 3, y0 + staffH); ctx.stroke();
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(endX, y0); ctx.lineTo(endX, y0 + staffH); ctx.stroke();
+    }
+  }
+}
+
+function drawDurationLabel(ctx, x, y, beats, color) {
+  const labels = {4:'𝅝',2:'𝅗',1:'♩',0.5:'♪',0.25:'𝅘𝅥𝅮',1.5:'♩.',0.75:'♪.'};
+  ctx.font = '10px "Space Mono", monospace';
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.fillText(labels[beats] || beats, x, y);
+  ctx.textAlign = 'left';
+}
+
+// ─── Tap Tempo ────────────────────────────────────────────
+let tapTimes = [];
+let tapTimeout = null;
+
+document.getElementById('btnTap').addEventListener('click', () => {
+  const now = performance.now();
+  tapTimes.push(now);
+
+  // 超过2秒没点就重置
+  clearTimeout(tapTimeout);
+  tapTimeout = setTimeout(() => { tapTimes = []; document.getElementById('tapResult').textContent = '—'; }, 2500);
+
+  if (tapTimes.length < 2) {
+    document.getElementById('tapResult').textContent = '继续点...';
+    return;
+  }
+
+  // 计算平均间隔
+  const gaps = [];
+  for (let i = 1; i < tapTimes.length; i++) gaps.push(tapTimes[i] - tapTimes[i-1]);
+  const avgGap = gaps.reduce((a,b) => a+b, 0) / gaps.length;
+  const tappedBpm = Math.round(60000 / avgGap);
+  const clampedBpm = Math.max(40, Math.min(200, tappedBpm));
+
+  document.getElementById('tapResult').textContent = `${clampedBpm} BPM`;
+  document.getElementById('btnTapApply').style.display = 'inline-block';
+  document.getElementById('btnTapApply').dataset.bpm = clampedBpm;
+  document.getElementById('btnTapReset').style.display = 'inline-block';
+});
+
+document.getElementById('btnTapReset').addEventListener('click', () => {
+  tapTimes = [];
+  document.getElementById('tapResult').textContent = '—';
+  document.getElementById('btnTapApply').style.display = 'none';
+  document.getElementById('btnTapReset').style.display = 'none';
+});
+
+document.getElementById('btnTapApply').addEventListener('click', async () => {
+  const newBpm = parseInt(document.getElementById('btnTapApply').dataset.bpm);
+  // 更新BPM滑块
+  document.getElementById('bpmRange').value = newBpm;
+  document.getElementById('bpmDisplay').textContent = newBpm;
+  document.getElementById('playbackBpm').value = newBpm;
+  document.getElementById('playbackBpmVal').textContent = newBpm;
+
+  // 用新BPM重新量化并渲染
+  if (!audioBuffer) return;
+  const rawNotes = await detectPitches(audioBuffer);
+  const notes = quantizeFromBasicPitch(rawNotes, newBpm, 0.25);
+  renderSheet(notes, newBpm);
+  renderNoteChips(notes);
+  updateStats(notes);
+  globalNotes = notes;
+  setupDownload(notes, newBpm);
+
+  document.getElementById('autoDetectResult').textContent =
+    `校准后：${newBpm} BPM · ${window._timeSig || '4/4'} 拍 · ${window._detectedKey || ''}`;
+});
+
+
+let playbackCtx = null;
+let playbackTimeout = [];
+let isPlaying = false;
+let globalNotes = [];
+
+document.getElementById('playbackBpm').addEventListener('input', function() {
+  document.getElementById('playbackBpmVal').textContent = this.value;
+});
+
+document.getElementById('btnPlay').addEventListener('click', async () => {
+  if (isPlaying) return;
+  const bpm = parseInt(document.getElementById('playbackBpm').value);
+  await playNotes(globalNotes, bpm);
+});
+
+document.getElementById('btnStop').addEventListener('click', stopPlayback);
+
+function stopPlayback() {
+  isPlaying = false;
+  playbackTimeout.forEach(t => clearTimeout(t));
+  playbackTimeout = [];
+  if (playbackCtx) { playbackCtx.close(); playbackCtx = null; }
+  document.getElementById('btnPlay').classList.remove('playing');
+  document.getElementById('btnPlay').textContent = '▶ 播放';
+  document.getElementById('playbackNote').textContent = '—';
+}
+
+function midiToHz(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+async function playNotes(notes, bpm) {
+  stopPlayback();
+  if (!notes || notes.length === 0) return;
+
+  // iOS 要求在用户点击时创建并 resume AudioContext
+  playbackCtx = new (window.AudioContext || window.webkitAudioContext)();
+  await playbackCtx.resume();
+
+  isPlaying = true;
+  document.getElementById('btnPlay').classList.add('playing');
+  document.getElementById('btnPlay').textContent = '♩ 播放中';
+
+  const beatDur = 60 / bpm * 1000; // ms per beat
+  let t = 0;
+
+  notes.forEach((note, idx) => {
+    const dur = note.beats * beatDur;
+
+    const tStart = setTimeout(() => {
+      if (!isPlaying) return;
+      document.getElementById('playbackNote').textContent = note.isRest ? '休止' : note.name;
+
+      if (!note.isRest && note.midi) {
+        const osc = playbackCtx.createOscillator();
+        const gain = playbackCtx.createGain();
+        osc.connect(gain);
+        gain.connect(playbackCtx.destination);
+
+        osc.type = 'sine';
+        osc.frequency.value = midiToHz(note.midi);
+
+        const startT = playbackCtx.currentTime;
+        const durSec = dur / 1000;
+        gain.gain.setValueAtTime(0, startT);
+        gain.gain.linearRampToValueAtTime(0.4, startT + 0.02);
+        gain.gain.setValueAtTime(0.4, startT + durSec * 0.7);
+        gain.gain.linearRampToValueAtTime(0, startT + durSec * 0.95);
+
+        osc.start(startT);
+        osc.stop(startT + durSec);
+      }
+    }, t);
+
+    playbackTimeout.push(tStart);
+    t += dur;
+  });
+
+  // End
+  const tEnd = setTimeout(() => {
+    document.getElementById('btnPlay').classList.remove('playing');
+    document.getElementById('btnPlay').textContent = '▶ 播放';
+    document.getElementById('playbackNote').textContent = '✓';
+    isPlaying = false;
+  }, t);
+  playbackTimeout.push(tEnd);
+}
+
+
+function renderNoteChips(notes) {
+  const list = document.getElementById('noteList');
+  list.innerHTML = '';
+  notes.forEach((n, i) => {
+    const chip = document.createElement('div');
+    chip.className = 'note-chip' + (n.isRest ? ' rest' : '');
+    const beatLabel = {4:'全',2:'二分',1:'四分',0.5:'八分',0.25:'十六分',1.5:'附点四分',0.75:'附点八分'}[n.beats] || n.beats+'拍';
+    chip.textContent = n.isRest ? `休止 ${beatLabel}` : `${n.name} ${beatLabel}`;
+    chip.style.animationDelay = `${i * 0.03}s`;
+    list.appendChild(chip);
+  });
+}
+
+// ─── Stats ────────────────────────────────────────────────
+function updateStats(notes) {
+  const pitched = notes.filter(n => !n.isRest);
+  document.getElementById('statNotes').textContent = pitched.length;
+  const total = notes.reduce((s, n) => s + n.beats, 0);
+  document.getElementById('statDuration').textContent = total.toFixed(1);
+
+  if (pitched.length > 0) {
+    const midis = pitched.map(n => n.midi);
+    const lo = midiToNoteName(Math.min(...midis));
+    const hi = midiToNoteName(Math.max(...midis));
+    document.getElementById('statRange').textContent = `${lo}–${hi}`;
+  }
+}
+
+// ─── Download ─────────────────────────────────────────────
+function setupDownload(notes, bpm) {
+  let text = `哼唱转录结果\nBPM: ${bpm}\n\n`;
+  text += notes.map(n => n.isRest ? `休止符 (${n.beats}拍)` : `${n.name} (${n.beats}拍)`).join('\n');
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  document.getElementById('btnDownload').href = url;
+}
+
+// ─── Progress helpers ─────────────────────────────────────
+function setStep(n) {
+  for (let i = 1; i <= 4; i++) {
+    const el = document.getElementById(`step${i}`);
+    el.classList.remove('active', 'done');
+    if (i < n) el.classList.add('done');
+    if (i === n) el.classList.add('active');
+  }
+}
+function setStepDone(n) { document.getElementById(`step${n}`).classList.replace('active','done'); }
+function setProgress(pct, text) {
+  document.getElementById('progressBar').style.width = pct + '%';
+  document.getElementById('progressText').textContent = text;
+}
+
+// ─── Error ────────────────────────────────────────────────
+function showError(msg) {
+  const el = document.getElementById('errorMsg');
+  el.textContent = msg;
+  el.classList.add('visible');
+  document.getElementById('progressArea').classList.remove('visible');
+}
+function hideError() { document.getElementById('errorMsg').classList.remove('visible'); }
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ─── Basic Pitch JS (embedded from @spotify/basic-pitch) ──
+const OUTPUT_TO_TENSOR_NAME = {
+    contours: 'Identity',
+    onsets: 'Identity_2',
+    frames: 'Identity_1',
+};
+const NUM_CHANNELS = 1;
+const AUDIO_SAMPLE_RATE = 22050;
+const FFT_HOP = 256;
+const ANNOTATIONS_FPS = Math.floor(AUDIO_SAMPLE_RATE / FFT_HOP);
+const AUDIO_WINDOW_LENGTH_SECONDS = 2;
+const AUDIO_N_SAMPLES = AUDIO_SAMPLE_RATE * AUDIO_WINDOW_LENGTH_SECONDS - FFT_HOP;
+const N_OVERLAPPING_FRAMES = 30;
+const N_OVERLAP_OVER_2 = Math.floor(N_OVERLAPPING_FRAMES / 2);
+const OVERLAP_LENGTH_FRAMES = N_OVERLAPPING_FRAMES * FFT_HOP;
+const HOP_SIZE = AUDIO_N_SAMPLES - OVERLAP_LENGTH_FRAMES;
+class BasicPitch {
+    constructor(modelOrModelPath) {
+        if (OVERLAP_LENGTH_FRAMES % 2 !== 0) {
+            throw new Error(`OVERLAP_LENGTH_FRAMES is not divisible by 2! Is ${OVERLAP_LENGTH_FRAMES}`);
+        }
+        this.model =
+            typeof modelOrModelPath === 'string'
+                ? tf.loadGraphModel(modelOrModelPath)
+                : modelOrModelPath;
+    }
+    adjustNoteStart(notes, offsetSeconds) {
+        return notes.map((note) => ({
+            startTimeSeconds: note.startTimeSeconds + offsetSeconds,
+            durationSeconds: note.durationSeconds,
+            pitch_midi: note.pitchMidi,
+            amplitude: note.amplitude,
+            pitchBends: note.pitchBends,
+        }));
+    }
+    async evaluateSingleFrame(reshapedInput, batchNumber) {
+        const model = await this.model;
+        const singleBatch = tf.slice(reshapedInput, batchNumber, 1);
+        const results = model.execute(singleBatch, [
+            OUTPUT_TO_TENSOR_NAME.frames,
+            OUTPUT_TO_TENSOR_NAME.onsets,
+            OUTPUT_TO_TENSOR_NAME.contours,
+        ]);
+        return [results[0], results[1], results[2]];
+    }
+    async prepareData(singleChannelAudioData) {
+        const wavSamples = tf.concat1d([
+            tf.zeros([Math.floor(OVERLAP_LENGTH_FRAMES / 2)], 'float32'),
+            tf.tensor(singleChannelAudioData),
+        ]);
+        return [
+            tf.expandDims(tf.signal.frame(wavSamples, AUDIO_N_SAMPLES, HOP_SIZE, true, 0), -1),
+            singleChannelAudioData.length,
+        ];
+    }
+    unwrapOutput(result) {
+        let rawOutput = result;
+        rawOutput = result.slice([0, N_OVERLAP_OVER_2, 0], [-1, result.shape[1] - 2 * N_OVERLAP_OVER_2, -1]);
+        const outputShape = rawOutput.shape;
+        return rawOutput.reshape([outputShape[0] * outputShape[1], outputShape[2]]);
+    }
+    async evaluateModel(resampledBuffer, onComplete, percentCallback) {
+        let singleChannelAudioData;
+        if (resampledBuffer instanceof Float32Array) {
+            singleChannelAudioData = resampledBuffer;
+        }
+        else {
+            if (resampledBuffer.sampleRate !== AUDIO_SAMPLE_RATE) {
+                throw new Error(`Input audio buffer is not at correct sample rate! ` +
+                    `Is ${resampledBuffer.sampleRate}. Should be ${AUDIO_SAMPLE_RATE}`);
+            }
+            if (resampledBuffer.numberOfChannels !== NUM_CHANNELS) {
+                throw new Error(`Input audio buffer is not mono! ` +
+                    `Number of channels is ${resampledBuffer.numberOfChannels}. Should be ${NUM_CHANNELS}`);
+            }
+            singleChannelAudioData = resampledBuffer.getChannelData(0);
+        }
+        const [reshapedInput, audioOriginalLength] = await this.prepareData(singleChannelAudioData);
+        const nOutputFramesOriginal = Math.floor(audioOriginalLength * (ANNOTATIONS_FPS / AUDIO_SAMPLE_RATE));
+        let calculatedFrames = 0;
+        for (let i = 0; i < reshapedInput.shape[0]; ++i) {
+            percentCallback(i / reshapedInput.shape[0]);
+            const [resultingFrames, resultingOnsets, resultingContours] = await this.evaluateSingleFrame(reshapedInput, i);
+            let unwrappedResultingFrames = this.unwrapOutput(resultingFrames);
+            let unwrappedResultingOnsets = this.unwrapOutput(resultingOnsets);
+            let unwrappedResultingContours = this.unwrapOutput(resultingContours);
+            const calculatedFramesTmp = unwrappedResultingFrames.shape[0];
+            if (calculatedFrames >= nOutputFramesOriginal) {
+                continue;
+            }
+            if (calculatedFramesTmp + calculatedFrames >= nOutputFramesOriginal) {
+                const framesToOutput = nOutputFramesOriginal - calculatedFrames;
+                unwrappedResultingFrames = unwrappedResultingFrames.slice([0, 0], [framesToOutput, -1]);
+                unwrappedResultingOnsets = unwrappedResultingOnsets.slice([0, 0], [framesToOutput, -1]);
+                unwrappedResultingContours = unwrappedResultingContours.slice([0, 0], [framesToOutput, -1]);
+            }
+            calculatedFrames += calculatedFramesTmp;
+            onComplete(await unwrappedResultingFrames.array(), await unwrappedResultingOnsets.array(), await unwrappedResultingContours.array());
+        }
+        percentCallback(1.0);
+    }
+}
+
+const MIDI_OFFSET = 21;
+const AUDIO_SAMPLE_RATE = 22050;
+const AUDIO_WINDOW_LENGTH = 2;
+const FFT_HOP = 256;
+const ANNOTATIONS_FPS = Math.floor(AUDIO_SAMPLE_RATE / FFT_HOP);
+const ANNOT_N_FRAMES = ANNOTATIONS_FPS * AUDIO_WINDOW_LENGTH;
+const AUDIO_N_SAMPLES = AUDIO_SAMPLE_RATE * AUDIO_WINDOW_LENGTH - FFT_HOP;
+const WINDOW_OFFSET = (FFT_HOP / AUDIO_SAMPLE_RATE) * (ANNOT_N_FRAMES - AUDIO_N_SAMPLES / FFT_HOP) +
+    0.0018;
+const MAX_FREQ_IDX = 87;
+const CONTOURS_BINS_PER_SEMITONE = 3;
+const ANNOTATIONS_BASE_FREQUENCY = 27.5;
+const ANNOTATIONS_N_SEMITONES = 88;
+const N_FREQ_BINS_CONTOURS = ANNOTATIONS_N_SEMITONES * CONTOURS_BINS_PER_SEMITONE;
+const hzToMidi = (hz) => 12 * (Math.log2(hz) - Math.log2(440.0)) + 69;
+const midiToHz = (midi) => 440.0 * 2.0 ** ((midi - 69.0) / 12.0);
+const modelFrameToTime = (frame) => (frame * FFT_HOP) / AUDIO_SAMPLE_RATE -
+    WINDOW_OFFSET * Math.floor(frame / ANNOT_N_FRAMES);
+function argMax(arr) {
+    return arr.length === 0
+        ? null
+        : arr.reduce((maxIndex, currentValue, index) => arr[maxIndex] > currentValue ? maxIndex : index, -1);
+}
+const argMaxAxis1 = (arr) => arr.map(row => argMax(row));
+function whereGreaterThanAxis1(arr2d, threshold) {
+    const outputX = [];
+    const outputY = [];
+    for (let i = 0; i < arr2d.length; i++) {
+        for (let j = 0; j < arr2d[i].length; j++) {
+            if (arr2d[i][j] > threshold) {
+                outputX.push(i);
+                outputY.push(j);
+            }
+        }
+    }
+    return [outputX, outputY];
+}
+function meanStdDev(array) {
+    const [sum, sumSquared, count] = array.reduce((prev, row) => {
+        const [rowSum, rowSumsSquared, rowCount] = row.reduce((p, value) => [p[0] + value, p[1] + value * value, p[2] + 1], [0, 0, 0]);
+        return [prev[0] + rowSum, prev[1] + rowSumsSquared, prev[2] + rowCount];
+    }, [0, 0, 0]);
+    const mean = sum / count;
+    const std = Math.sqrt((1 / (count - 1)) * (sumSquared - (sum * sum) / count));
+    return [mean, std];
+}
+function globalMax(array) {
+    return array.reduce((prev, row) => Math.max(prev, ...row), 0);
+}
+function min3dForAxis0(array) {
+    const minArray = array[0].map(v => v.slice());
+    for (let x = 1; x < array.length; ++x) {
+        for (let y = 0; y < array[0].length; ++y) {
+            for (let z = 0; z < array[0][0].length; ++z) {
+                minArray[y][z] = Math.min(minArray[y][z], array[x][y][z]);
+            }
+        }
+    }
+    return minArray;
+}
+function argRelMax(array, order = 1) {
+    const result = [];
+    for (let col = 0; col < array[0].length; ++col) {
+        for (let row = 0; row < array.length; ++row) {
+            let isRelMax = true;
+            for (let comparisonRow = Math.max(0, row - order); isRelMax && comparisonRow <= Math.min(array.length - 1, row + order); ++comparisonRow) {
+                if (comparisonRow !== row) {
+                    isRelMax = isRelMax && array[row][col] > array[comparisonRow][col];
+                }
+            }
+            if (isRelMax) {
+                result.push([row, col]);
+            }
+        }
+    }
+    return result;
+}
+function max3dForAxis0(array) {
+    const maxArray = array[0].map(v => v.slice());
+    for (let x = 1; x < array.length; ++x) {
+        for (let y = 0; y < array[0].length; ++y) {
+            for (let z = 0; z < array[0][0].length; ++z) {
+                maxArray[y][z] = Math.max(maxArray[y][z], array[x][y][z]);
+            }
+        }
+    }
+    return maxArray;
+}
+function isNotNull(t) {
+    return t !== null;
+}
+function constrainFrequency(onsets, frames, maxFreq, minFreq) {
+    if (maxFreq) {
+        const maxFreqIdx = hzToMidi(maxFreq) - MIDI_OFFSET;
+        for (let i = 0; i < onsets.length; i++) {
+            onsets[i].fill(0, maxFreqIdx);
+        }
+        for (let i = 0; i < frames.length; i++) {
+            frames[i].fill(0, maxFreqIdx);
+        }
+    }
+    if (minFreq) {
+        const minFreqIdx = hzToMidi(minFreq) - MIDI_OFFSET;
+        for (let i = 0; i < onsets.length; i++) {
+            onsets[i].fill(0, 0, minFreqIdx);
+        }
+        for (let i = 0; i < frames.length; i++) {
+            frames[i].fill(0, 0, minFreqIdx);
+        }
+    }
+}
+function getInferredOnsets(onsets, frames, nDiff = 2) {
+    const diffs = Array.from(Array(nDiff).keys())
+        .map(n => n + 1)
+        .map(n => {
+        const framesAppended = Array(n)
+            .fill(Array(frames[0].length).fill(0))
+            .concat(frames);
+        const nPlus = framesAppended.slice(n);
+        const minusN = framesAppended.slice(0, -n);
+        if (nPlus.length !== minusN.length) {
+            throw new Error(`nPlus length !== minusN length: ${nPlus.length} !== ${minusN.length}`);
+        }
+        return nPlus.map((row, r) => row.map((v, c) => v - minusN[r][c]));
+    });
+    let frameDiff = min3dForAxis0(diffs);
+    frameDiff = frameDiff.map(row => row.map(v => Math.max(v, 0)));
+    frameDiff = frameDiff.map((row, r) => (r < nDiff ? row.fill(0) : row));
+    const onsetMax = globalMax(onsets);
+    const frameDiffMax = globalMax(frameDiff);
+    frameDiff = frameDiff.map(row => row.map(v => (onsetMax * v) / frameDiffMax));
+    return max3dForAxis0([onsets, frameDiff]);
+}
+function outputToNotesPoly(frames, onsets, onsetThresh = 0.5, frameThresh = 0.3, minNoteLen = 5, inferOnsets = true, maxFreq = null, minFreq = null, melodiaTrick = true, energyTolerance = 11) {
+    let inferredFrameThresh = frameThresh;
+    if (inferredFrameThresh === null) {
+        const [mean, std] = meanStdDev(frames);
+        inferredFrameThresh = mean + std;
+    }
+    const nFrames = frames.length;
+    constrainFrequency(onsets, frames, maxFreq, minFreq);
+    let inferredOnsets = onsets;
+    if (inferOnsets) {
+        inferredOnsets = getInferredOnsets(onsets, frames);
+    }
+    const peakThresholdMatrix = inferredOnsets.map(o => o.map(() => 0));
+    argRelMax(inferredOnsets).forEach(([row, col]) => {
+        peakThresholdMatrix[row][col] = inferredOnsets[row][col];
+    });
+    const [noteStarts, freqIdxs] = whereGreaterThanAxis1(peakThresholdMatrix, onsetThresh);
+    noteStarts.reverse();
+    freqIdxs.reverse();
+    const remainingEnergy = frames.map(frame => frame.slice());
+    const noteEvents = noteStarts
+        .map((noteStartIdx, idx) => {
+        const freqIdx = freqIdxs[idx];
+        if (noteStartIdx >= nFrames - 1) {
+            return null;
+        }
+        let i = noteStartIdx + 1;
+        let k = 0;
+        while (i < nFrames - 1 && k < energyTolerance) {
+            if (remainingEnergy[i][freqIdx] < inferredFrameThresh) {
+                k += 1;
+            }
+            else {
+                k = 0;
+            }
+            i += 1;
+        }
+        i -= k;
+        if (i - noteStartIdx <= minNoteLen) {
+            return null;
+        }
+        for (let j = noteStartIdx; j < i; ++j) {
+            remainingEnergy[j][freqIdx] = 0;
+            if (freqIdx < MAX_FREQ_IDX) {
+                remainingEnergy[j][freqIdx + 1] = 0;
+            }
+            if (freqIdx > 0) {
+                remainingEnergy[j][freqIdx - 1] = 0;
+            }
+        }
+        const amplitude = frames
+            .slice(noteStartIdx, i)
+            .reduce((prev, row) => prev + row[freqIdx], 0) /
+            (i - noteStartIdx);
+        return {
+            startFrame: noteStartIdx,
+            durationFrames: i - noteStartIdx,
+            pitchMidi: freqIdx + MIDI_OFFSET,
+            amplitude: amplitude,
+        };
+    })
+        .filter(isNotNull);
+    if (melodiaTrick === true) {
+        while (globalMax(remainingEnergy) > inferredFrameThresh) {
+            const [iMid, freqIdx] = remainingEnergy.reduce((prevCoord, currRow, rowIdx) => {
+                const colMaxIdx = argMax(currRow);
+                return currRow[colMaxIdx] >
+                    remainingEnergy[prevCoord[0]][prevCoord[1]]
+                    ? [rowIdx, colMaxIdx]
+                    : prevCoord;
+            }, [0, 0]);
+            remainingEnergy[iMid][freqIdx] = 0;
+            let i = iMid + 1;
+            let k = 0;
+            while (i < nFrames - 1 && k < energyTolerance) {
+                if (remainingEnergy[i][freqIdx] < inferredFrameThresh) {
+                    k += 1;
+                }
+                else {
+                    k = 0;
+                }
+                remainingEnergy[i][freqIdx] = 0;
+                if (freqIdx < MAX_FREQ_IDX) {
+                    remainingEnergy[i][freqIdx + 1] = 0;
+                }
+                if (freqIdx > 0) {
+                    remainingEnergy[i][freqIdx - 1] = 0;
+                }
+                i += 1;
+            }
+            const iEnd = i - 1 - k;
+            i = iMid - 1;
+            k = 0;
+            while (i > 0 && k < energyTolerance) {
+                if (remainingEnergy[i][freqIdx] < inferredFrameThresh) {
+                    k += 1;
+                }
+                else {
+                    k = 0;
+                }
+                remainingEnergy[i][freqIdx] = 0;
+                if (freqIdx < MAX_FREQ_IDX) {
+                    remainingEnergy[i][freqIdx + 1] = 0;
+                }
+                if (freqIdx > 0) {
+                    remainingEnergy[i][freqIdx - 1] = 0;
+                }
+                i -= 1;
+            }
+            const iStart = i + 1 + k;
+            if (iStart < 0) {
+                throw new Error(`iStart is not positive! value: ${iStart}`);
+            }
+            if (iEnd >= nFrames) {
+                throw new Error(`iEnd is past end of times. (iEnd, times.length): (${iEnd}, ${nFrames})`);
+            }
+            const amplitude = frames.slice(iStart, iEnd).reduce((sum, row) => sum + row[freqIdx], 0) /
+                (iEnd - iStart);
+            if (iEnd - iStart <= minNoteLen) {
+                continue;
+            }
+            noteEvents.push({
+                startFrame: iStart,
+                durationFrames: iEnd - iStart,
+                pitchMidi: freqIdx + MIDI_OFFSET,
+                amplitude: amplitude,
+            });
+        }
+    }
+    return noteEvents;
+}
+const gaussian = (M, std) => Array.from(Array(M).keys()).map(n => Math.exp((-1 * (n - (M - 1) / 2) ** 2) / (2 * std ** 2)));
+const midiPitchToContourBin = (pitchMidi) => 12.0 *
+    CONTOURS_BINS_PER_SEMITONE *
+    Math.log2(midiToHz(pitchMidi) / ANNOTATIONS_BASE_FREQUENCY);
+function addPitchBendsToNoteEvents(contours, notes, nBinsTolerance = 25) {
+    const windowLength = nBinsTolerance * 2 + 1;
+    const freqGaussian = gaussian(windowLength, 5);
+    return notes.map(note => {
+        const freqIdx = Math.floor(Math.round(midiPitchToContourBin(note.pitchMidi)));
+        const freqStartIdx = Math.max(freqIdx - nBinsTolerance, 0);
+        const freqEndIdx = Math.min(N_FREQ_BINS_CONTOURS, freqIdx + nBinsTolerance + 1);
+        const freqGuassianSubMatrix = freqGaussian.slice(Math.max(0, nBinsTolerance - freqIdx), windowLength -
+            Math.max(0, freqIdx - (N_FREQ_BINS_CONTOURS - nBinsTolerance - 1)));
+        const pitchBendSubmatrix = contours
+            .slice(note.startFrame, note.startFrame + note.durationFrames)
+            .map(d => d
+            .slice(freqStartIdx, freqEndIdx)
+            .map((v, col) => v * freqGuassianSubMatrix[col]));
+        const pbShift = nBinsTolerance - Math.max(0, nBinsTolerance - freqIdx);
+        const bends = argMaxAxis1(pitchBendSubmatrix).map(v => v - pbShift);
+        return Object.assign(Object.assign({}, note), { pitchBends: bends });
+    });
+}
+const noteFramesToTime = (notes) => notes.map(note => {
+    return {
+        pitchMidi: note.pitchMidi,
+        amplitude: note.amplitude,
+        pitchBends: note.pitchBends,
+        startTimeSeconds: modelFrameToTime(note.startFrame),
+        durationSeconds: modelFrameToTime(note.startFrame + note.durationFrames) -
+            modelFrameToTime(note.startFrame),
+    };
+});
+function generateFileData(notes) {
+    const midi = new Midi();
+    const track = midi.addTrack();
+    notes.forEach(note => {
+        track.addNote({
+            midi: note.pitchMidi,
+            time: note.startTimeSeconds,
+            duration: note.durationSeconds,
+            velocity: note.amplitude,
+        });
+        if (note.pitchBends !== undefined && note.pitchBends !== null) {
+            note.pitchBends.forEach((bend, i) => {
+                track.addPitchBend({
+                    time: note.startTimeSeconds +
+                        (i * note.durationSeconds) / note.pitchBends.length,
+                    value: bend,
+                });
+            });
+        }
+    });
+    return Buffer.from(midi.toArray());
+}
+const testables = {
+    argRelMax: argRelMax,
+    argMax: argMax,
+    argMaxAxis1: argMaxAxis1,
+    whereGreaterThanAxis1: whereGreaterThanAxis1,
+    meanStdDev: meanStdDev,
+    globalMax: globalMax,
+    min3dForAxis0: min3dForAxis0,
+    max3dForAxis0: max3dForAxis0,
+    getInferredOnsets: getInferredOnsets,
+    constrainFrequency: constrainFrequency,
+    modelFrameToTime: modelFrameToTime,
+    hzToMidi: hzToMidi,
+    generateFileData: generateFileData,
+    noteFramesToTime: noteFramesToTime,
+    gaussian: gaussian,
+    midiPitchToContourBin: midiPitchToContourBin,
+    midiToHz: midiToHz,
+};
+
+// ─── Key detection from note events ───────────────────────
+function detectKeyFromNotes(notes) {
+  const majorProfile = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
+  const minorProfile = [6.33,2.68,3.52,5.38,2.60,3.53,2.54,4.75,3.98,2.69,3.34,3.17];
+  const counts = new Array(12).fill(0);
+  for (const n of notes) {
+    if (n.midi) counts[((n.midi % 12) + 12) % 12] += n.duration || 1;
+  }
+  const total = counts.reduce((a,b)=>a+b,0) || 1;
+  const norm = counts.map(c => c/total);
+  const noteNames = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  let bestKey = 'C 大调', bestScore = -Infinity;
+  for (let root = 0; root < 12; root++) {
+    const mj = pearson(norm, rotate(majorProfile, root));
+    if (mj > bestScore) { bestScore = mj; bestKey = noteNames[root] + ' 大调'; }
+    const mn = pearson(norm, rotate(minorProfile, root));
+    if (mn > bestScore) { bestScore = mn; bestKey = noteNames[root] + ' 小调'; }
+  }
+  return bestKey;
+}
+
+// ─── Quantize from Basic Pitch note events ────────────────
+function quantizeFromBasicPitch(notes, bpm, minNote = 0.25) {
+  if (!notes || notes.length === 0) return [];
+  const beatDur = 60 / bpm;
+  const noteOptions = [4, 2, 1.5, 1, 0.75, 0.5, 0.25].filter(x => x >= minNote);
+  const timeSig = window._timeSig || '4/4';
+  const beatsPerMeasure = timeSig === '3/4' ? 3 : timeSig === '6/8' ? 6 : 4;
+
+  // Sort by time
+  const sorted = [...notes].sort((a,b) => a.time - b.time);
+
+  // Build timeline: interleave notes with rests
+  const result = [];
+  let cursor = 0; // current time in seconds
+
+  for (const note of sorted) {
+    // Gap before this note → rest
+    const gap = note.time - cursor;
+    if (gap > beatDur * minNote * 0.5) {
+      const restBeats = gap / beatDur;
+      const qRest = noteOptions.reduce((a,b) => Math.abs(b-restBeats)<Math.abs(a-restBeats)?b:a);
+      if (qRest >= minNote) {
+        result.push({ name:'R', midi:null, beats: qRest, isRest: true });
+      }
+    }
+
+    // Quantize note duration
+    const durBeats = note.duration / beatDur;
+    const q = noteOptions.reduce((a,b) => Math.abs(b-durBeats)<Math.abs(a-durBeats)?b:a);
+    const beats = Math.max(minNote, q);
+
+    result.push({
+      name: midiToNoteName(note.midi),
+      midi: note.midi,
+      beats,
+      isRest: false
+    });
+
+    cursor = note.time + note.duration;
+  }
+
+  // Merge consecutive rests
+  const merged = [];
+  for (const n of result) {
+    const prev = merged[merged.length-1];
+    if (prev && n.isRest && prev.isRest) { prev.beats += n.beats; }
+    else merged.push({...n});
+  }
+
+  // Split notes longer than one measure
+  const final = [];
+  for (const n of merged) {
+    if (n.beats > beatsPerMeasure + 0.01) {
+      let rem = n.beats;
+      while (rem >= minNote) {
+        const b = Math.min(beatsPerMeasure, noteOptions.reduce((a,b2)=>Math.abs(b2-rem)<Math.abs(a-rem)?b2:a));
+        final.push({...n, beats: b});
+        rem -= b;
+      }
+    } else {
+      final.push(n);
+    }
+  }
+
+  return final;
+}
+
+</script>
+</body>
+</html>
